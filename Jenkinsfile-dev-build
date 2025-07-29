@@ -1,0 +1,531 @@
+node("docker-ubuntu20-xlarge") {
+    properties([
+        pipelineTriggers([
+            cron('30 0 * * *')
+        ])
+    ])
+    try {
+        statusMatrix = [:]
+        withCredentials([string(credentialsId: 'repo21-url', variable: 'REPO21_URL')]) {
+            echo "${REPO21_URL}"
+            def repo21Name = "${REPO21_URL}".substring(8, "${REPO21_URL}".length())
+            env.REPO_NAME_21 = "$repo21Name"
+        }
+        def reposMap = [
+            "artifactory-jenkins-plugin": [url: "https://github.com/jfrog/jenkins-artifactory-plugin", branch:"master", type: "maven", jdk:"8"],
+            "build-info-extractor": [url: "https://github.com/jfrog/build-info", branch: "master", type: "gradle", buildDir:"build/libs", jdk:"8"],
+            "teamcity-artifactory-plugin": [url: "https://github.com/jfrog/teamcity-artifactory-plugin.git", branch: "master",  type: "maven", jdk:"8"],
+            "artifactory-maven-plugin": [url: "https://github.com/jfrog/artifactory-maven-plugin.git", branch: "master", type: "maven", jdk:"8"],
+            "artifactory-client-java": [url: "https://github.com/jfrog/artifactory-client-java.git", branch: "master", type: "gradle", buildDir:"services/build/libs", "jdk":"8"],
+            "artifactory-gradle-plugin": [url: "https://github.com/jfrog/artifactory-gradle-plugin.git", branch: "main", type: "gradle", buildDir:"build/libs", jdk:"8"],
+            "file-specs-java": [url: "https://github.com/jfrog/file-specs-java.git", branch: "main", type: "gradle", buildDir:"build/libs", jdk:"8"],
+            "jfrog-testing-infra": [url: "https://github.com/jfrog/jfrog-testing-infra.git", branch: "main", dir:"java", type: "gradle", buildDir:"build/libs", jdk:"8"],
+            "bamboo-artifactory-plugin": [url: "https://github.com/jfrog/bamboo-artifactory-plugin.git", branch: "master", type: "maven", jdk:"11"],
+            "jfrog-plugin": [url: "https://github.com/jenkinsci/jfrog-plugin.git", branch:"main", type: "maven", jdk:"11"],
+            "bamboo-jfrog-plugin": [url: "https://github.com/jfrog/bamboo-jfrog-plugin.git", branch: "main", type: "maven", jdk:"17"],
+            "jfrog-azure-devops-extension": [url: "https://github.com/jfrog/jfrog-azure-devops-extension.git",branch: "dev", type: "npm"],
+            "cocoapods-art": [url: "https://github.com/jfrog/cocoapods-art.git", branch: "master", type: "ruby"],
+            "jfrog-setup-cli": [url: "https://bitbucket.org/jfrog/jfrog-setup-cli.git", branch: "master", type: "docker"]
+        ]
+
+        buildStatus = 'SUCCESS'
+        cliExecutableName = 'jf'
+        formattedDate = new Date().format('yyyy-MM-dd')
+        env.CI = true
+        env.JFROG_CLI_LOG_LEVEL = "DEBUG"
+        tasksToRun = [:]
+        dir('temp') {
+            sh "cat /etc/lsb-release"
+            builderPath = "/usr/local/bin/jf"
+            formattedDate = new Date().format('yyyy-MM-dd')
+            slackChannelName = params.SLACK_CHANNEL_FOR_PLUGINS_DEV_BUILD_NOTIFICATION
+            watchName = params.WATCH_NAME
+            pluginSelected = "ALL"
+            pluginProvidedForOnDemandScanning=params.PLUGINS_NAME
+            repoUrlProvidedForOnDemand=params.REPO_URL_FOR_SCANNING
+            branchProvidedForOnDemandScanning = params.BRANCH_FOR_SCANNING
+            jfrogPluginsDevBuildTargetRepoName = params.REPO_FOR_PLUGINS_DEV_UPLOAD
+            jdkProvidedForOnDemand = params.JDK_VERSION
+            mvnHome = ""
+            jdk8Path = ""
+            jdk17Path = ""
+            gradleHomePath = ""
+            stage('Initial Setup'){
+                try  {
+                script{
+                     installJfrogCli()
+                     selectPlugins()
+                     sh 'apt-get update -y && apt-get install -y unzip'
+
+                     mvnHome = installMaven("3.9.6")
+
+                     gradleHomePath = installGradle('8.5')
+
+                     configRepo21()
+
+                     configGradle()
+
+                     jdk8Path = installJdkFromArchive('8')
+
+                     jdk17Path = installJdkFromArchive('17')
+
+                     installNodeJs()
+
+                    }
+                }
+                catch (e) {
+                    notifyFailure('Installing Jf & Tools', e)
+                    throw e
+                }
+            }
+            script {
+                tasksToRun = createBuildTasks(reposMap, pluginSelected, mvnHome, jdk8Path, jdk17Path, gradleHomePath)
+                parallel(tasksToRun)
+                cleanupRepo21()
+            }
+        }
+    } catch (e) {
+        echo "ERROR: Pipeline failed with exception: ${e}"
+        buildStatus = 'FAILURE'
+        throw e
+    }
+    finally {
+        stage('Send Notifications') {
+            def message = ''
+            updateUnsupportedPluginStatus(statusMatrix)
+            def summary = formatStatusMatrix(statusMatrix)
+            if (buildStatus == 'SUCCESS') {
+                message = "Dev Build Jenkins Pipeline has successfully completed.\n<${env.BUILD_URL}|View Build>${summary}"
+                slackSend(channel: "#${slackChannelName}", message: message, color: 'good')
+            } else {
+                message = """@here Dev Build Jenkins Pipeline has a problem.
+                *Status* : *${buildStatus}*.
+                *Build* : <${env.BUILD_URL}|${env.JOB_NAME} #${env.BUILD_NUMBER}>${summary}"""
+                slackSend(channel: "#${slackChannelName}", message: message, color: 'danger')
+            }
+            echo "Final notification message would be: \n${message}"
+        }
+    }
+}
+
+def selectPlugins() {
+    def buildCauses = currentBuild.getBuildCauses()
+    def timerCause = buildCauses.find { cause ->
+        cause._class == 'hudson.triggers.TimerTrigger$TimerTriggerCause'
+    }
+    echo "timerCause value: ${timerCause}"
+    if (!timerCause) {
+        pluginSelected=pluginProvidedForOnDemandScanning
+    }
+    echo "Selected PluginName's : ${pluginSelected}"
+}
+
+def createBuildTasks(Map reposMap, String pluginSelected, String mvnHome, String jdk8Path, String jdk17Path, String gradleHomePath) {
+    tasks = [:]
+
+    if (pluginSelected == "ALL") {
+        reposMap.each { repoName, details ->
+            tasks[repoName] = {
+                statusMatrix[repoName] = [Build: 'PENDING', Upload: 'PENDING', Scan: 'PENDING']
+                buildBinary(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath)
+            }
+        }
+    } else {
+        if (reposMap.containsKey(pluginSelected)) {
+            def repoName = pluginSelected
+            def details = reposMap[pluginSelected]
+            if (branchProvidedForOnDemandScanning!="default") {
+                details.branch = branchProvidedForOnDemandScanning
+            }
+            if (jdkProvidedForOnDemand!="default" && details.jdk!=null){
+                details.jdk = jdkProvidedForOnDemand
+            }
+            if (repoUrlProvidedForOnDemand!="default") {
+                details.url = repoUrlProvidedForOnDemand
+            }
+            tasks[repoName] = {
+                statusMatrix[repoName] = [Build: 'PENDING', Upload: 'PENDING', Scan: 'PENDING']
+                buildBinary(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath)
+            }
+        } else {
+            error("Plugin '${pluginSelected}' was not found in the repository map.")
+        }
+    }
+    return tasks
+}
+
+def configGradle(){
+    sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve='${jfrogPluginsDevBuildTargetRepoName}'"
+}
+
+def updateUnsupportedPluginStatus(Map matrix) {
+    unsupportedPlugins=["cocoapods-art"]
+    unsupportedPlugins.each { plugin ->
+        if (matrix.containsKey(plugin)) {
+            matrix[plugin]["Build"]="⚠️"
+            matrix[plugin]["Upload"]="⚠️"
+            matrix[plugin]["Scan"]="⚠️"
+        }
+    }
+}
+
+def formatStatusMatrix(Map matrix) {
+    def message = ""
+    matrix.each { repo, stage ->
+        message += "\n• *${repo}:*"
+        message += "\n    1. Build: ${stage.Build}"
+        message += "\n    2. Upload: ${stage.Upload}"
+        message += "\n    3. Scan: ${stage.Scan}"
+    }
+    return message
+}
+
+def notifyFailure(String stageName, error) {
+    def message = """@here :x: *Build FAILED!*
+    *Job:* `${env.JOB_NAME}` #${env.BUILD_NUMBER}
+    *Failed Stage:* `${stageName}`
+    *Error:* `${error.message.trim()}`
+    *<${env.BUILD_URL}|Open Build Log>*"""
+    echo "Sending failure notification for stage: ${stageName}"
+    slackSend(
+        channel: "#${slackChannelName}",
+        color: 'danger',
+        message: message
+    )
+}
+
+def installJdkFromArchive(String version) {
+    def jdkUrlMap = [
+        "8": "https://api.adoptium.net/v3/binary/latest/8/ga/linux/x64/jdk/hotspot/normal/eclipse",
+        "11": "https://api.adoptium.net/v3/binary/latest/11/ga/linux/x64/jdk/hotspot/normal/eclipse",
+        "17": "https://api.adoptium.net/v3/binary/latest/17/ga/linux/x64/jdk/hotspot/normal/eclipse"
+    ]
+    def downloadUrl = jdkUrlMap[version]
+    if (!downloadUrl) {
+        error "No download URL defined for JDK version ${version}"
+    }
+
+    def installDir = "jdk-${version}-install"
+    sh "mkdir -p ${installDir}"
+
+    dir(installDir) {
+        echo "Downloading JDK ${version}..."
+        sh "curl -L -o jdk.tar.gz '${downloadUrl}'"
+        echo "Extracting JDK..."
+        sh "tar -xzf jdk.tar.gz"
+
+        def jdkDirName = sh(script: "find . -maxdepth 1 -type d -name '*jdk*'", returnStdout: true).trim()
+        if (jdkDirName.isEmpty()) {
+            error "Could not find extracted JDK directory."
+        }
+
+        return "${pwd()}/${jdkDirName}"
+    }
+}
+
+def installGradle(String version) {
+    echo "--- Installing Gradle v${version} ---"
+
+    def downloadUrl = "https://services.gradle.org/distributions/gradle-${version}-bin.zip"
+    sh "curl --fail -L -o gradle.zip '${downloadUrl}'"
+
+    sh "unzip gradle.zip"
+
+    def gradleDirName = sh(script: "find . -maxdepth 1 -type d -name 'gradle-*'", returnStdout: true).trim()
+    if (gradleDirName.isEmpty()) {
+        error "Could not find extracted Gradle directory."
+    }
+
+    def gradleHome = "${pwd()}/${gradleDirName}"
+    return gradleHome
+}
+
+def installMaven(String mavenVersion){
+    sh "curl -O https://archive.apache.org/dist/maven/maven-3/${mavenVersion}/binaries/apache-maven-${mavenVersion}-bin.tar.gz"
+    sh "tar -xzf apache-maven-${mavenVersion}-bin.tar.gz"
+    def mvnHome = "${pwd()}/apache-maven-${mavenVersion}"
+    return mvnHome
+}
+
+def cloneAndBuild(repoName, details, mvnHome, gradleHomePath) {
+    withEnv(["PATH+MAVEN=${mvnHome}/bin",
+            "PATH+GRADLE=${gradleHomePath}/bin"]) {
+        echo "--- Starting process for ${repoName} ---"
+        sh "java -version"
+        sh "mvn -v"
+        sh 'gradle -v'
+        dir(repoName) {
+            switch (details.type) {
+                case "maven":
+                    executeMaven(repoName, details)
+                    break
+                case "gradle":
+                    executeGradle(repoName, details)
+                    break
+                default:
+                    echo "--- Unsupported project type  ---"
+                    break
+            }
+        }
+    }
+}
+
+def executeMaven(repoName, details){
+    def tempScanDir = "temp-scan-dir"
+    stage("Build Binary for ${repoName}"){
+        try{
+            echo "Cloning from ${details.url}..."
+            git url: details.url, branch: details.branch
+
+            sh 'mvn clean install -DskipTests'
+
+            sh "mkdir -p ${tempScanDir}"
+
+            def jarFiles = findFiles(glob: 'target/**/*.jar')
+            if (jarFiles.size() > 0) {
+                def zipFileName = "${repoName}-binaries.zip"
+                zip(zipFile: "${tempScanDir}/${zipFileName}", dir: 'target', glob: '**/*.jar')
+                echo "Successfully created archive of .jar files in ${tempScanDir}"
+            }
+
+            def existingZipFiles = findFiles(glob: 'target/*.zip')
+            if (existingZipFiles.size() > 0) {
+                echo "Found ${existingZipFiles.size()} pre-existing zip file(s). Copying them..."
+                sh "cp target/*.zip ${tempScanDir}/"
+            }
+            statusMatrix[repoName]["Build"] = '✅'
+        }catch (e) {
+            statusMatrix[repoName]["Build"] = '❌'
+            throw e
+        }
+    }
+
+    dir(tempScanDir) {
+        def filesToScan = findFiles(glob: '**/*')
+        if (filesToScan.size() > 0) {
+            UploadAndScanBinary(repoName, "*.zip", "*.zip")
+        } else {
+            echo "No files found in ${tempScanDir} to scan."
+        }
+    }
+}
+
+def UploadAndScanBinary(repoName, uploadFileName, scanFileName){
+    stage("Upload Binary for ${repoName}"){
+        try{
+            sh "${builderPath} rt u '${uploadFileName}' '${jfrogPluginsDevBuildTargetRepoName}/plugins/dev/${formattedDate}/' --flat"
+            statusMatrix[repoName]["Upload"] = '✅'
+        }catch (e) {
+            statusMatrix[repoName]["Upload"] = '❌'
+            throw e
+        }
+    }
+    stage("Scan Binary for ${repoName}"){
+        try{
+            sh "${builderPath} scan --server-id=repo21 '${scanFileName}' --ant=true --watches ${watchName}"
+            statusMatrix[repoName]["Scan"] = '✅'
+        }catch(e){
+            statusMatrix[repoName]["Scan"] = '❌'
+            throw e
+        }
+    }
+}
+
+def installJfrogCli() {
+    sh 'curl -fL https://install-cli.jfrog.io | sh'
+    sh '/usr/local/bin/jf --version'
+}
+
+def executeGradle(repoName, details){
+    echo "Cloning from ${details.url}...Inside executeGradle"
+    git url: details.url, branch: details.branch
+
+    def buildLogic
+        echo "Starting Gradle build for ${repoName}..."
+
+        def hasFunctionalTest = sh(script: "./gradlew tasks --all | grep 'functionalTest' || true", returnStdout: true).trim()
+        if (hasFunctionalTest) {
+            echo "Project has a 'functionalTest' task. Excluding it."
+            try{
+                sh './gradlew clean build -x test -x functionalTest'
+                statusMatrix[repoName]["Build"] = '✅'
+            }catch (e) {
+                statusMatrix[repoName]["Build"] = '❌'
+                throw e
+            }
+        } else {
+            echo "Project does not have a 'functionalTest' task."
+            try{
+                sh './gradlew clean build -x test'
+                statusMatrix[repoName]["Build"] = '✅'
+            }catch (e) {
+                statusMatrix[repoName]["Build"] = '❌'
+                throw e
+            }
+        }
+
+        def buildOutputDir = details.buildDir
+        sh "ls -la ${buildOutputDir}"
+
+        def jarFiles = findFiles(glob: "${buildOutputDir}/*.jar")
+        if (jarFiles.size() > 0) {
+            def zipFileName = "${repoName}-binaries.zip"
+            zip(zipFile: zipFileName, dir: buildOutputDir, glob: '**/*.jar')
+            echo "Successfully created ${zipFileName}"
+            UploadAndScanBinary(repoName, "${zipFileName}", "${zipFileName}")
+        }
+
+        def zipFiles = findFiles(glob: "${buildOutputDir}/*.zip")
+        if (zipFiles.size() > 0) {
+            UploadAndScanBinary(repoName, "${buildOutputDir}/*.zip", "${buildOutputDir}/*.zip")
+        }
+    }
+    if(details.dir){
+        dir(details.dir){
+            buildLogic()
+        }
+    }else{
+        buildLogic()
+    }
+}
+
+def executeJDKProject(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath){
+    if(details.jdk=="8"){
+        withEnv(["JAVA_HOME=${jdk8Path}", "PATH+JAVA=${jdk8Path}/bin"]) {
+            cloneAndBuild(repoName, details, mvnHome, gradleHomePath)
+        }
+    } else if(details.jdk=="11"){
+        cloneAndBuild(repoName, details, mvnHome, gradleHomePath)
+    } else if(details.jdk=="17"){
+        withEnv(["JAVA_HOME=${jdk17Path}", "PATH=${jdk17Path}/bin:${env.PATH}"]) {
+            echo "Inside java 8 block: ${jdk8Path}"
+            echo "Inside java 17 block: ${jdk17Path}"
+            sh "java -version"
+            cloneAndBuild(repoName, details, mvnHome, gradleHomePath)
+        }
+    }
+}
+
+def installNodeJs() {
+    sh 'apt-get update -y'
+    sh 'apt-get install -y nodejs npm'
+
+    sh 'node -v'
+    sh 'npm -v'
+}
+
+def buildBinary(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath){
+    switch (details.type) {
+        case ["maven", "gradle"]:
+            executeJDKProject(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath)
+            break
+        case "ruby":
+            buildAndProcessRubyGem(repoName, details)
+            break
+        case "npm":
+            executeNPMProject(repoName, details)
+            break
+        case "docker":
+            buildAndScanPipeImage(repoName, details)
+            break
+        default:
+            echo "--- Unsupported project type  ---"
+            break
+    }
+}
+
+def executeNPMProject(repoName, details){
+    dir(repoName){
+        def zipFileName = ""
+        stage("Build Binary for ${repoName}"){
+            git url: details.url, branch: details.branch
+            try{
+                sh 'npm install'
+                sh 'npm run create'
+
+                def vsixFile = sh(script: "find . -maxdepth 1 -name '*.vsix'", returnStdout: true).trim()
+                if (vsixFile.isEmpty()) {
+                    error "Build failed: Could not find generated .vsix file."
+                }
+                def vsixFileName = vsixFile.replace('./', '')
+                zipFileName = "${vsixFileName}.zip"
+
+                echo "Zipping ${vsixFileName} into ${zipFileName}..."
+                zip(zipFile: zipFileName, archive: true, glob: "${vsixFileName}")
+                echo "Successfully created zip archive: ${zipFileName}"
+                statusMatrix[repoName]["Build"] = '✅'
+            }catch(e){
+                statusMatrix[repoName]["Build"] = '❌'
+                throw e
+            }
+        }
+        UploadAndScanBinary(repoName, "${zipFileName}", "${zipFileName}")
+    }
+}
+
+def buildAndProcessRubyGem(repoName, details){
+    dir(repoName){
+        stage("Build Binary for ${repoName}"){
+            git url: details.url, branch: details.branch
+            try{
+                git url: details.url, branch: details.branch
+                statusMatrix[repoName]["Build"] = '✅'
+            }catch(e){
+                statusMatrix[repoName]["Build"] = '❌'
+                throw e
+            }
+        }
+        stage("Upload Binary for ${repoName}"){
+            statusMatrix[repoName]["Upload"] = '✅'
+        }
+        stage("Audit for ${repoName}"){
+            try{
+                sh "${builderPath} audit --watches ${watchName} --format=simple-json"
+                statusMatrix[repoName]["Scan"] = '✅'
+            }catch(e){
+                statusMatrix[repoName]["Scan"] = '❌'
+                throw e
+            }
+        }
+    }
+}
+
+def buildAndScanPipeImage(repoName, details) {
+    dir(repoName) {
+        String zipFileName = ""
+        stage("Build Binary for ${repoName}"){
+            try{
+                git url: details.url, branch: details.branch
+                String imageName = "jfrog-setup-cli-pipe:${formattedDate}"
+                def dockerImage = docker.build(imageName)
+
+                String tarFileName = "jfrog-setup-cli-pipe_${formattedDate}.tar"
+                zipFileName = "jfrog-setup-cli-pipe_${formattedDate}.zip"
+
+                sh "docker save -o ${tarFileName} ${imageName}"
+
+                zip(zipFile: zipFileName, archive: false, glob: tarFileName)
+                statusMatrix[repoName]["Build"] = '✅'
+            }catch(e){
+                statusMatrix[repoName]["Build"] = '❌'
+                throw e
+            }
+        }
+        UploadAndScanBinary(repoName, "${zipFileName}", "${zipFileName}")
+    }
+}
+
+def configRepo21() {
+    withCredentials([
+        // jfrog-ignore
+        usernamePassword(credentialsId: 'repo21', usernameVariable: 'REPO21_USER', passwordVariable: 'REPO21_PASSWORD'),
+        string(credentialsId: 'repo21-url', variable: 'REPO21_URL')
+    ]) {
+        sh "${builderPath} c add repo21 --url=${REPO21_URL} --user=${REPO21_USER} --password=${REPO21_PASSWORD} --overwrite"
+        sh "${builderPath} c use repo21"
+    }
+}
+
+def cleanupRepo21() {
+    sh "${builderPath} c rm repo21 --quiet"
+}
