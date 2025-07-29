@@ -313,8 +313,6 @@ def executeMaven(repoName, details){
 def UploadAndScanBinary(repoName, uploadFileName, scanFileName){
     stage("Upload Binary for ${repoName}"){
         try{
-            sh "pwd"
-            sh "ls -la"
             sh "${builderPath} rt u '${uploadFileName}' '${jfrogPluginsDevBuildTargetRepoName}/plugins/dev/${formattedDate}/' --flat"
             statusMatrix[repoName]["Upload"] = '✅'
         }catch (e) {
@@ -327,7 +325,6 @@ def UploadAndScanBinary(repoName, uploadFileName, scanFileName){
             sh "${builderPath} scan --server-id=repo21 '${scanFileName}' --ant=true --watches ${watchName}"
             statusMatrix[repoName]["Scan"] = '✅'
         }catch(e){
-            echo "Inside Scan Binary Catch"
             statusMatrix[repoName]["Scan"] = '❌'
             throw e
         }
@@ -343,10 +340,7 @@ def executeGradle(repoName, details){
     echo "Cloning from ${details.url}...Inside executeGradle"
     git url: details.url, branch: details.branch
 
-    def buildLogic={
-        echo "Contents Inside.."
-        sh "pwd"
-        sh "ls -la"
+    def buildLogic
         echo "Starting Gradle build for ${repoName}..."
 
         def hasFunctionalTest = sh(script: "./gradlew tasks --all | grep 'functionalTest' || true", returnStdout: true).trim()
