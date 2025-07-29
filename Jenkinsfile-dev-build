@@ -29,7 +29,6 @@ node("docker-ubuntu20-xlarge") {
         ]
 
         buildStatus = 'SUCCESS'
-        cliExecutableName = 'jf'
         formattedDate = new Date().format('yyyy-MM-dd')
         env.CI = true
         env.JFROG_CLI_LOG_LEVEL = "DEBUG"
