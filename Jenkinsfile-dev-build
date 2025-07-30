@@ -162,9 +162,9 @@ def updateUnsupportedPluginStatus(Map matrix) {
     unsupportedPlugins=["cocoapods-art"]
     unsupportedPlugins.each { plugin ->
         if (matrix.containsKey(plugin)) {
-            matrix[plugin]["Build"]  = "⚠️        "
-            matrix[plugin]["Upload"] = "⚠️        "
-            matrix[plugin]["Scan"]   = "⚠️        "
+            matrix[plugin]["Build"]  = "⚪ "
+            matrix[plugin]["Upload"] = "⚪ "
+            matrix[plugin]["Scan"]   = "⚪ "
         }
     }
 }
@@ -176,11 +176,11 @@ def formatStatusMatrix(Map matrix) {
     message.append(String.format("%-30s | %-10s | %-10s | %-10s\n", "------------------------------", "----------", "----------", "----------"))
 
     matrix.each { repo, stages ->
-        def build = stages.Build ?: 'N/A'+ ' '
-        def upload = stages.Upload ?: 'N/A'+ ' '
-        def scan = stages.Scan ?: 'N/A'+ ' '
+        def build = stages.Build ?: 'N/A'
+        def upload = stages.Upload ?: 'N/A'
+        def scan = stages.Scan ?: 'N/A'
 
-        message.append("| ${repo} | ${build} | ${upload} | ${scan} |\n")
+        message.append(String.format("%-30s | %-10s | %-10s | %-10s\n", repo, build, upload, scan))
     }
 
     message.append("```")
@@ -485,7 +485,6 @@ def buildAndProcessRubyGem(repoName, details){
                 statusMatrix[repoName]["Build"] = '✅'
             }catch(e){
                 statusMatrix[repoName]["Build"] = '❌'
-                throw e
             }
         }
         stage("Upload Binary for ${repoName}"){
@@ -497,7 +496,6 @@ def buildAndProcessRubyGem(repoName, details){
                 statusMatrix[repoName]["Scan"] = '✅'
             }catch(e){
                 statusMatrix[repoName]["Scan"] = '❌'
-                throw e
             }
         }
     }
