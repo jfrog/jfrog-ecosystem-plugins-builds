@@ -435,12 +435,12 @@ def buildBinary(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath)
 
 def executeNPMProject(repoName, details){
     dir(repoName){
-        def zipFileName = ""
+        def tgzFile = ""
         stage("Build Binary for ${repoName}"){
             git url: details.url, branch: details.branch
             try{
                 sh 'npm install'
-                def tgzFile = sh(script: 'npm pack', returnStdout: true).trim()
+                tgzFile = sh(script: 'npm pack', returnStdout: true).trim()
                 if (tgzFile.isEmpty()) {
                     error("npm pack failed or did not return a filename.")
                 }
@@ -451,7 +451,7 @@ def executeNPMProject(repoName, details){
                 throw e
             }
         }
-        UploadAndScanBinary(repoName, "${zipFileName}", "${zipFileName}")
+        UploadAndScanBinary(repoName, "${tgzFile}", "${tgzFile}")
     }
 }
 
