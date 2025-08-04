@@ -17,14 +17,13 @@ node("docker-ubuntu20-xlarge") {
             "teamcity-artifactory-plugin": [url: "https://github.com/jfrog/teamcity-artifactory-plugin.git", branch: "master",  type: "maven", jdk:"8"],
             "artifactory-maven-plugin": [url: "https://github.com/jfrog/artifactory-maven-plugin.git", branch: "master", type: "maven", jdk:"8"],
             "artifactory-client-java": [url: "https://github.com/jfrog/artifactory-client-java.git", branch: "master", type: "gradle", buildDir:"services/build/libs", "jdk":"8"],
-            "artifactory-gradle-plugin": [url: "https://github.com/jfrog/artifactory-gradle-plugin.git", branch: "main", type: "gradle", buildDir:"build/libs", jdk:"8"],
+            "artifactory-gradle-plugin": [url: "https://github.com/jfrog/artifactory-gradle-plugin.git", branch: "main", type: "gradle", buildDir:"build/libs", hasFunctionalTest:true, jdk:"8"],
             "file-specs-java": [url: "https://github.com/jfrog/file-specs-java.git", branch: "main", type: "gradle", buildDir:"build/libs", jdk:"8"],
             "jfrog-testing-infra": [url: "https://github.com/jfrog/jfrog-testing-infra.git", branch: "main", dir:"java", type: "gradle", buildDir:"build/libs", jdk:"8"],
             "bamboo-artifactory-plugin": [url: "https://github.com/jfrog/bamboo-artifactory-plugin.git", branch: "master", type: "maven", jdk:"11"],
             "jfrog-plugin": [url: "https://github.com/jenkinsci/jfrog-plugin.git", branch:"main", type: "maven", jdk:"11"],
             "bamboo-jfrog-plugin": [url: "https://github.com/jfrog/bamboo-jfrog-plugin.git", branch: "main", type: "maven", jdk:"17"],
             "jfrog-azure-devops-extension": [url: "https://github.com/jfrog/jfrog-azure-devops-extension.git",branch: "dev", type: "npm"],
-            "cocoapods-art": [url: "https://github.com/jfrog/cocoapods-art.git", branch: "master", type: "ruby"],
             "jfrog-setup-cli": [url: "https://bitbucket.org/jfrog/jfrog-setup-cli.git", branch: "master", type: "docker"]
         ]
 
@@ -46,6 +45,9 @@ node("docker-ubuntu20-xlarge") {
             branchProvidedForOnDemandScanning = params.BRANCH_FOR_SCANNING
             jfrogPluginsDevBuildTargetRepoName = params.REPO_FOR_PLUGINS_DEV_UPLOAD
             jdkProvidedForOnDemand = params.JDK_VERSION
+            buildNumber = env.BUILD_NUMBER
+            MAVEN_VERSION = params.MAVEN_VERSION ?: "3.9.6"
+            GRADLE_VERSION = params.GRADLE_VERSION ?: "8.5"
             mvnHome = ""
             jdk8Path = ""
             jdk17Path = ""
@@ -57,9 +59,9 @@ node("docker-ubuntu20-xlarge") {
                      selectPlugins()
                      sh 'apt-get update -y && apt-get install -y unzip'
 
-                     mvnHome = installMaven("3.9.6")
+                     mvnHome = installMaven(MAVEN_VERSION)
 
-                     gradleHomePath = installGradle('8.5')
+                     gradleHomePath = installGradle(GRADLE_VERSION)
 
                      configRepo21()
 
@@ -75,6 +77,7 @@ node("docker-ubuntu20-xlarge") {
                 }
                 catch (e) {
                     notifyFailure('Installing Jf & Tools', e)
+                    echo "Error details: ${e}"
                     throw e
                 }
             }
@@ -156,17 +159,6 @@ def createBuildTasks(Map reposMap, String pluginSelected, String mvnHome, String
 
 def configGradle(){
     sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve='${jfrogPluginsDevBuildTargetRepoName}'"
-}
-
-def updateUnsupportedPluginStatus(Map matrix) {
-    unsupportedPlugins=["cocoapods-art"]
-    unsupportedPlugins.each { plugin ->
-        if (matrix.containsKey(plugin)) {
-            matrix[plugin]["Build"]  = "⚪ "
-            matrix[plugin]["Upload"] = "⚪ "
-            matrix[plugin]["Scan"]   = "⚪ "
-        }
-    }
 }
 
 def formatStatusMatrix(Map matrix) {
@@ -284,7 +276,7 @@ def executeMaven(repoName, details){
             echo "Cloning from ${details.url}..."
             git url: details.url, branch: details.branch
 
-            sh 'mvn clean install -DskipTests'
+            sh 'mvn clean install -DskipTests -T C'
 
             sh "mkdir -p ${tempScanDir}"
 
@@ -322,7 +314,7 @@ def UploadAndScanBinary(repoName, uploadFileName, scanFileName){
         try{
             sh "pwd"
             sh "ls -la"
-            sh "${builderPath} rt u '${uploadFileName}' '${jfrogPluginsDevBuildTargetRepoName}/plugins/dev/${formattedDate}/' --flat"
+            sh "${builderPath} rt u '${uploadFileName}' '${jfrogPluginsDevBuildTargetRepoName}/plugins/dev/${formattedDate}/${buildNumber}/' --flat"
             statusMatrix[repoName]["Upload"] = '✅'
         }catch (e) {
             statusMatrix[repoName]["Upload"] = '❌'
@@ -356,7 +348,7 @@ def executeGradle(repoName, details){
         sh "ls -la"
         echo "Starting Gradle build for ${repoName}..."
 
-        def hasFunctionalTest = sh(script: "./gradlew tasks --all | grep 'functionalTest' || true", returnStdout: true).trim()
+        def hasFunctionalTest = details.hasFunctionalTest
         if (hasFunctionalTest) {
             echo "Project has a 'functionalTest' task. Excluding it."
             try{
@@ -411,8 +403,6 @@ def executeJDKProject(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHom
         cloneAndBuild(repoName, details, mvnHome, gradleHomePath)
     } else if(details.jdk=="17"){
         withEnv(["JAVA_HOME=${jdk17Path}", "PATH=${jdk17Path}/bin:${env.PATH}"]) {
-            echo "Inside java 8 block: ${jdk8Path}"
-            echo "Inside java 17 block: ${jdk17Path}"
             sh "java -version"
             cloneAndBuild(repoName, details, mvnHome, gradleHomePath)
         }
@@ -432,14 +422,11 @@ def buildBinary(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath)
         case ["maven", "gradle"]:
             executeJDKProject(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath)
             break
-        case "ruby":
-            buildAndProcessRubyGem(repoName, details)
-            break
         case "npm":
             executeNPMProject(repoName, details)
             break
         case "docker":
-            buildAndScanPipeImage(repoName, details)
+            buildAndScanDockerImage(repoName, details)
             break
         default:
             echo "--- Unsupported project type  ---"
@@ -454,18 +441,11 @@ def executeNPMProject(repoName, details){
             git url: details.url, branch: details.branch
             try{
                 sh 'npm install'
-                sh 'npm run create'
-
-                def vsixFile = sh(script: "find . -maxdepth 1 -name '*.vsix'", returnStdout: true).trim()
-                if (vsixFile.isEmpty()) {
-                    error "Build failed: Could not find generated .vsix file."
+                def tgzFile = sh(script: 'npm pack', returnStdout: true).trim()
+                if (tgzFile.isEmpty()) {
+                    error("npm pack failed or did not return a filename.")
                 }
-                def vsixFileName = vsixFile.replace('./', '')
-                zipFileName = "${vsixFileName}.zip"
-
-                echo "Zipping ${vsixFileName} into ${zipFileName}..."
-                zip(zipFile: zipFileName, archive: true, glob: "${vsixFileName}")
-                echo "Successfully created zip archive: ${zipFileName}"
+                echo "Successfully created zip archive: ${tgzFile}"
                 statusMatrix[repoName]["Build"] = '✅'
             }catch(e){
                 statusMatrix[repoName]["Build"] = '❌'
@@ -476,39 +456,14 @@ def executeNPMProject(repoName, details){
     }
 }
 
-def buildAndProcessRubyGem(repoName, details){
-    dir(repoName){
-        stage("Build Binary for ${repoName}"){
-            git url: details.url, branch: details.branch
-            try{
-                git url: details.url, branch: details.branch
-                statusMatrix[repoName]["Build"] = '✅'
-            }catch(e){
-                statusMatrix[repoName]["Build"] = '❌'
-            }
-        }
-        stage("Upload Binary for ${repoName}"){
-            statusMatrix[repoName]["Upload"] = '✅'
-        }
-        stage("Audit for ${repoName}"){
-            try{
-                sh "${builderPath} audit --watches ${watchName} --format=simple-json"
-                statusMatrix[repoName]["Scan"] = '✅'
-            }catch(e){
-                statusMatrix[repoName]["Scan"] = '❌'
-            }
-        }
-    }
-}
-
-def buildAndScanPipeImage(repoName, details) {
+def buildAndScanDockerImage(repoName, details) {
     dir(repoName) {
         String zipFileName = ""
         stage("Build Binary for ${repoName}"){
             try{
                 git url: details.url, branch: details.branch
                 String imageName = "jfrog-setup-cli-pipe:${formattedDate}"
-                def dockerImage = docker.build(imageName)
+                docker.build(imageName)
 
                 String tarFileName = "jfrog-setup-cli-pipe_${formattedDate}.tar"
                 zipFileName = "jfrog-setup-cli-pipe_${formattedDate}.zip"
