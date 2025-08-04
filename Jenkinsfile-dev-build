@@ -277,7 +277,7 @@ def executeMaven(repoName, details){
             echo "Cloning from ${details.url}..."
             git url: details.url, branch: details.branch
 
-            sh 'mvn clean install -DskipTests -T C'
+            sh 'mvn clean install -DskipTests -T 1C'
 
             sh "mkdir -p ${tempScanDir}"
 
