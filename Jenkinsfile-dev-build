@@ -46,8 +46,8 @@ node("docker-ubuntu20-xlarge") {
             jfrogPluginsDevBuildTargetRepoName = params.REPO_FOR_PLUGINS_DEV_UPLOAD
             jdkProvidedForOnDemand = params.JDK_VERSION
             buildNumber = env.BUILD_NUMBER
-            MAVEN_VERSION = params.MAVEN_VERSION ?: "3.9.6"
-            GRADLE_VERSION = params.GRADLE_VERSION ?: "8.5"
+            MAVEN_VERSION = params.MAVEN_VERSION
+            GRADLE_VERSION = params.GRADLE_VERSION
             mvnHome = ""
             jdk8Path = ""
             jdk17Path = ""
