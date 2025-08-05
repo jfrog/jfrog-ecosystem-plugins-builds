@@ -10,7 +10,18 @@ node("docker-ubuntu20-xlarge") {
         statusMatrix = [:]
         withCredentials([string(credentialsId: 'repo21-url', variable: 'REPO21_URL')]) {
             echo "${REPO21_URL}"
-            def repo21Name = "${REPO21_URL}".substring(8, "${REPO21_URL}".length())
+            def repo21Name = ""
+            if (REPO21_URL && REPO21_URL.length() > 8) {
+                if (REPO21_URL.startsWith("https://")) {
+                    repo21Name = REPO21_URL.substring(8)
+                } else if (REPO21_URL.startsWith("http://")) {
+                    repo21Name = REPO21_URL.substring(7)
+                } else {
+                    repo21Name = REPO21_URL
+                }
+            } else {
+                error "Invalid REPO21_URL: ${REPO21_URL}"
+            }
             env.REPO_NAME_21 = "$repo21Name"
         }
         def reposMap = [
@@ -241,8 +252,18 @@ def installGradle(String version) {
 }
 
 def installMaven(String mavenVersion){
-    sh "curl -O https://archive.apache.org/dist/maven/maven-3/${mavenVersion}/binaries/apache-maven-${mavenVersion}-bin.tar.gz"
-    sh "tar -xzf apache-maven-${mavenVersion}-bin.tar.gz"
+    def downloadStatus = sh(
+        script: "curl -f -O https://archive.apache.org/dist/maven/maven-3/${mavenVersion}/binaries/apache-maven-${mavenVersion}-bin.tar.gz",
+        returnStatus: true
+    )
+    if (downloadStatus != 0) {
+        error "Failed to download Maven ${mavenVersion}. Exit code: ${downloadStatus}"
+    }
+
+    def extractStatus = sh(script: "tar -xzf apache-maven-${mavenVersion}-bin.tar.gz", returnStatus: true)
+    if (extractStatus != 0) {
+        error "Failed to extract Maven ${mavenVersion}. Exit code: ${extractStatus}"
+    }
     def mvnHome = "${pwd()}/apache-maven-${mavenVersion}"
     return mvnHome
 }
@@ -335,15 +356,22 @@ def UploadAndScanBinary(repoName, uploadFileName, scanFileName){
 }
 
 def installJfrogCli() {
-    sh 'curl -fL https://install-cli.jfrog.io | sh'
-    sh '/usr/local/bin/jf --version'
+    def curlStatus = sh(script: 'curl -fL https://install-cli.jfrog.io | sh', returnStatus: true)
+    if (curlStatus != 0) {
+        error "Failed to download JFrog CLI. Exit code: ${curlStatus}"
+    }
+
+    def versionStatus = sh(script: '/usr/local/bin/jf --version', returnStatus: true)
+    if (versionStatus != 0) {
+        error "Failed to verify JFrog CLI installation. Exit code: ${versionStatus}"
+    }
 }
 
 def executeGradle(repoName, details){
     echo "Cloning from ${details.url}...Inside executeGradle"
     git url: details.url, branch: details.branch
 
-    def buildLogic={
+    def buildLogic = {
         echo "Contents Inside.."
         sh "pwd"
         sh "ls -la"
@@ -387,6 +415,9 @@ def executeGradle(repoName, details){
         }
     }
     if(details.dir){
+        if (!fileExists(details.dir)) {
+            error("Build failed: The specified directory '${details.dir}' does not exist.")
+        }
         dir(details.dir){
             buildLogic()
         }
@@ -403,8 +434,7 @@ def executeJDKProject(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHom
     } else if(details.jdk=="11"){
         cloneAndBuild(repoName, details, mvnHome, gradleHomePath)
     } else if(details.jdk=="17"){
-        withEnv(["JAVA_HOME=${jdk17Path}", "PATH=${jdk17Path}/bin:${env.PATH}"]) {
-            sh "java -version"
+        withEnv(["JAVA_HOME=${jdk17Path}", "PATH+JAVA=${jdk17Path}/bin"]) {
             cloneAndBuild(repoName, details, mvnHome, gradleHomePath)
         }
     }
