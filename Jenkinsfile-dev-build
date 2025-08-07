@@ -36,8 +36,7 @@ node("docker-ubuntu20-xlarge") {
             "bamboo-artifactory-plugin": [url: "https://github.com/jfrog/bamboo-artifactory-plugin.git", branch: "master", type: "maven", jdk:"11"],
             "jfrog-plugin": [url: "https://github.com/jenkinsci/jfrog-plugin.git", branch:"main", type: "maven", jdk:"11"],
             "bamboo-jfrog-plugin": [url: "https://github.com/jfrog/bamboo-jfrog-plugin.git", branch: "main", type: "maven", jdk:"17"],
-            "jfrog-azure-devops-extension": [url: "https://github.com/jfrog/jfrog-azure-devops-extension.git",branch: "dev", type: "npm"],
-            "jfrog-setup-cli": [url: "https://bitbucket.org/jfrog/jfrog-setup-cli.git", branch: "master", type: "docker"]
+            "jfrog-azure-devops-extension": [url: "https://github.com/jfrog/jfrog-azure-devops-extension.git",branch: "dev", type: "npm"]
         ]
 
         buildStatus = 'SUCCESS'
@@ -456,9 +455,6 @@ def buildBinary(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath)
         case "npm":
             executeNPMProject(repoName, details)
             break
-        case "docker":
-            buildAndScanDockerImage(repoName, details)
-            break
         default:
             echo "--- Unsupported project type  ---"
             break
@@ -484,31 +480,6 @@ def executeNPMProject(repoName, details){
             }
         }
         UploadAndScanBinary(repoName, "${tgzFile}", "${tgzFile}")
-    }
-}
-
-def buildAndScanDockerImage(repoName, details) {
-    dir(repoName) {
-        String zipFileName = ""
-        stage("Build Binary for ${repoName}"){
-            try{
-                git url: details.url, branch: details.branch
-                String imageName = "jfrog-setup-cli-pipe:${formattedDate}"
-                docker.build(imageName)
-
-                String tarFileName = "jfrog-setup-cli-pipe_${formattedDate}.tar"
-                zipFileName = "jfrog-setup-cli-pipe_${formattedDate}.zip"
-
-                sh "docker save -o ${tarFileName} ${imageName}"
-
-                zip(zipFile: zipFileName, archive: false, glob: tarFileName)
-                statusMatrix[repoName]["Build"] = '✅'
-            }catch(e){
-                statusMatrix[repoName]["Build"] = '❌'
-                throw e
-            }
-        }
-        UploadAndScanBinary(repoName, "${zipFileName}", "${zipFileName}")
     }
 }
 
