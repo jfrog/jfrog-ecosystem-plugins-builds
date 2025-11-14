@@ -1,0 +1,8 @@
+{
+  "secrets": {
+    "username": "your-jfrog-username",
+    "password": "your-jfrog-password-or-access-token",
+    "url": "https://yourcompany.jfrog.io"
+  }
+}
+

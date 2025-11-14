@@ -1,0 +1,19 @@
+# Credential files - NEVER commit these!
+*-creds.json
+jfrog-creds.json
+**/credentials.json
+
+# Jenkins workspace
+.jenkins/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
