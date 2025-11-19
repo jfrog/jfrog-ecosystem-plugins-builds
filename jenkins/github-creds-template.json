@@ -1,0 +1,8 @@
+{
+  "secrets": {
+    "token": "github_pat_YOUR_TOKEN_HERE",
+    "url": "https://api.github.com/repos/OWNER/REPO/actions/workflows/WORKFLOW.yml/dispatches",
+    "workflow_run_url": "https://api.github.com/repos/OWNER/REPO/actions/runs"
+  }
+}
+
