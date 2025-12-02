@@ -1,0 +1,9 @@
+{
+  "secrets": {
+    "username": "your-nexus-username",
+    "password": "your-nexus-password",
+    "url": "https://your-nexus-server.com"
+  }
+}
+
+

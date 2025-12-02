@@ -1,0 +1,7 @@
+{
+  "secrets": {
+    "token": "your-azure-devops-personal-access-token",
+    "publisherId": "your-publisher-id",
+    "extensionId": "your-extension-id"
+  }
+}
