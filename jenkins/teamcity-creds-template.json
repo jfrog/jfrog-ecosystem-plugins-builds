@@ -1,0 +1,6 @@
+{
+  "secrets": {
+    "token": "your-jetbrains-plugin-repository-token",
+    "url": "https://plugins.jetbrains.com"
+  }
+}
