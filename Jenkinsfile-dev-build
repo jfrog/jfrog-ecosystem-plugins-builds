@@ -481,12 +481,12 @@ def executeJDKProject(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHom
 }
 
 def installNodeJs() {
-    def nodeHome = tool name: 'node-20', type: 'jenkins.plugins.nodejs.tools.NodeJSInstallation'
-
-    withEnv(["PATH+NODE=${nodeHome}/bin"]) {
-        sh 'node -v'
-        sh 'npm -v'
-    }
+    sh '''
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        apt-get install -y nodejs
+        node -v
+        npm -v
+    '''
 }
 
 def buildBinary(repoName, details, mvnHome, jdk8Path, jdk17Path, gradleHomePath){
