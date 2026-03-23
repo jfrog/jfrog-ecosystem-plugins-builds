@@ -374,6 +374,13 @@ def executeGradle(repoName, details){
         echo "Contents Inside.."
         sh "pwd"
         sh "ls -la"
+        
+        // Regenerate gradle.yaml with correct server ID for repos with existing config
+        if (fileExists('.jfrog/projects/gradle.yaml')) {
+            echo "Found existing gradle.yaml, regenerating with repo21 server ID..."
+            sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve='${jfrogPluginsDevBuildTargetRepoName}' --use-wrapper"
+        }
+        
         echo "Starting Gradle build for ${repoName}..."
 
         def hasFunctionalTest = details.hasFunctionalTest
