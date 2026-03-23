@@ -1,6 +1,6 @@
 // Jenkins CI pipeline for building, uploading, and scanning JFrog plugin binaries across multiple ecosystems.
 // Supports Maven, Gradle, NPM, and Docker plugins. Notifies Slack on build completion/failure.
-node("docker-ubuntu20-xlarge") {
+node("docker-ubuntu24-xlarge") {
     properties([
         pipelineTriggers([
             cron('30 0 * * *')
@@ -409,6 +409,13 @@ def executeGradle(repoName, details){
         echo "Contents Inside.."
         sh "pwd"
         sh "ls -la"
+        
+        // Regenerate gradle.yaml with correct server ID for repos with existing config
+        if (fileExists('.jfrog/projects/gradle.yaml')) {
+            echo "Found existing gradle.yaml, regenerating with repo21 server ID..."
+            sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve='${jfrogPluginsDevBuildTargetRepoName}' --use-wrapper"
+        }
+        
         echo "Starting Gradle build for ${repoName}..."
 
         def hasFunctionalTest = details.hasFunctionalTest
