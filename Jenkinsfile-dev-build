@@ -1,6 +1,6 @@
 // Jenkins CI pipeline for building, uploading, and scanning JFrog plugin binaries across multiple ecosystems.
 // Supports Maven, Gradle, NPM, and Docker plugins. Notifies Slack on build completion/failure.
-node("docker-ubuntu20-xlarge") {
+node("docker-ubuntu22-xlarge") {
     properties([
         pipelineTriggers([
             cron('30 0 * * *')
