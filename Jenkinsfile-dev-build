@@ -2,6 +2,17 @@
 // Supports Maven, Gradle, NPM, and Docker plugins. Notifies Slack on build completion/failure.
 node("docker-ubuntu24-xlarge") {
     properties([
+        parameters([
+            string(name: 'PLUGINS_NAME', defaultValue: 'ALL', description: 'Comma-separated plugin names to build, or ALL'),
+            string(name: 'REPO_URL_FOR_SCANNING', defaultValue: 'default', description: 'On-demand scan: repo URL override'),
+            string(name: 'BRANCH_FOR_SCANNING', defaultValue: 'default', description: 'On-demand scan: branch override'),
+            string(name: 'REPO_FOR_PLUGINS_DEV_UPLOAD', defaultValue: 'ecosys-dev-build-artifactory', description: 'Artifactory repo to upload dev binaries to'),
+            string(name: 'WATCH_NAME', defaultValue: 'ecosystem-watch', description: 'Xray watch name'),
+            string(name: 'JDK_VERSION', defaultValue: 'default', description: 'JDK version override (default uses per-plugin jdk)'),
+            string(name: 'MAVEN_VERSION', defaultValue: '3.9.6', description: 'Maven version to install on the agent'),
+            string(name: 'GRADLE_VERSION', defaultValue: '8.5', description: 'Gradle version to install on the agent'),
+            string(name: 'SLACK_CHANNEL_FOR_PLUGINS_DEV_BUILD_NOTIFICATION', defaultValue: 'jfrog-cli-dev-build-notifications', description: 'Slack channel for build notifications')
+        ]),
         pipelineTriggers([
             cron('30 0 * * *')
         ])
