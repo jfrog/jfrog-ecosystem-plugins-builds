@@ -107,7 +107,25 @@ node("docker-ubuntu24-xlarge") {
             }
             script {
                 tasksToRun = createBuildTasks(reposMap, pluginSelected, mvnHome, jdk8Path, jdk17Path, gradleHomePath)
-                parallel(tasksToRun)
+
+                // Run Gradle plugins serially to avoid concurrent Maven Central 429s
+                // (each Gradle build still declares mavenCentral() in build.gradle).
+                // Maven/NPM plugins keep running in parallel.
+                def gradleNames = reposMap.findAll { n, d -> d.type == 'gradle' }.keySet()
+                def parallelMap = [:]
+                def gradleSerial = [:]
+                tasksToRun.each { n, t ->
+                    if (gradleNames.contains(n)) gradleSerial[n] = t
+                    else parallelMap[n] = t
+                }
+                if (gradleSerial) {
+                    parallelMap['gradle-plugins (serial)'] = {
+                        gradleSerial.each { name, task ->
+                            try { task.call() } catch (e) { echo "Plugin ${name} failed: ${e.message}" }
+                        }
+                    }
+                }
+                parallel(parallelMap)
                 cleanupRepo21()
             }
         }
@@ -349,6 +367,9 @@ def executeMaven(repoName, details){
             statusMatrix[repoName]["Build"] = '✅'
         }catch (e) {
             statusMatrix[repoName]["Build"] = '❌'
+            statusMatrix[repoName]["Upload"] = '⏭ SKIPPED'
+            statusMatrix[repoName]["Scan"] = '⏭ SKIPPED'
+            auditStatusMatrix[repoName]["Audit"] = '⏭ SKIPPED'
             throw e
         }
     }
@@ -374,6 +395,7 @@ def UploadAndScanBinary(repoName, uploadFileName, scanFileName){
             statusMatrix[repoName]["Upload"] = '✅'
         }catch (e) {
             statusMatrix[repoName]["Upload"] = '❌'
+            statusMatrix[repoName]["Scan"] = '⏭ SKIPPED'
             throw e
         }
     }
@@ -438,6 +460,9 @@ def executeGradle(repoName, details){
                 statusMatrix[repoName]["Build"] = '✅'
             }catch (e) {
                 statusMatrix[repoName]["Build"] = '❌'
+                statusMatrix[repoName]["Upload"] = '⏭ SKIPPED'
+                statusMatrix[repoName]["Scan"] = '⏭ SKIPPED'
+                auditStatusMatrix[repoName]["Audit"] = '⏭ SKIPPED'
                 throw e
             }
         } else {
@@ -447,6 +472,9 @@ def executeGradle(repoName, details){
                 statusMatrix[repoName]["Build"] = '✅'
             }catch (e) {
                 statusMatrix[repoName]["Build"] = '❌'
+                statusMatrix[repoName]["Upload"] = '⏭ SKIPPED'
+                statusMatrix[repoName]["Scan"] = '⏭ SKIPPED'
+                auditStatusMatrix[repoName]["Audit"] = '⏭ SKIPPED'
                 throw e
             }
         }
@@ -537,6 +565,9 @@ def executeNPMProject(repoName, details){
                 statusMatrix[repoName]["Build"] = '✅'
             }catch(e){
                 statusMatrix[repoName]["Build"] = '❌'
+                statusMatrix[repoName]["Upload"] = '⏭ SKIPPED'
+                statusMatrix[repoName]["Scan"] = '⏭ SKIPPED'
+                auditStatusMatrix[repoName]["Audit"] = '⏭ SKIPPED'
                 throw e
             }
         }
