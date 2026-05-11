@@ -444,11 +444,9 @@ def executeGradle(repoName, details){
         sh "pwd"
         sh "ls -la"
         
-        // Regenerate gradle.yaml with correct server ID for repos with existing config
-        if (fileExists('.jfrog/projects/gradle.yaml')) {
-            echo "Found existing gradle.yaml, regenerating with repo21 server ID..."
-            sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve=dev-master-maven-virtual --use-wrapper"
-        }
+        // jf gradle requires a per-project .jfrog/projects/gradle.yaml. Always run gradlec
+        // here so `jf gradle ... --use-wrapper` can resolve through repo21.
+        sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve=dev-master-maven-virtual --use-wrapper"
         
         echo "Starting Gradle build for ${repoName}..."
 
