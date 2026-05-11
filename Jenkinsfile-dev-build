@@ -454,7 +454,7 @@ def executeGradle(repoName, details){
         if (hasFunctionalTest) {
             echo "Project has a 'functionalTest' task. Excluding it."
             try{
-                sh "${builderPath} gradle --use-wrapper clean build -x test -x functionalTest"
+                sh "${builderPath} gradle clean build -x test -x functionalTest"
                 statusMatrix[repoName]["Build"] = '✅'
             }catch (e) {
                 statusMatrix[repoName]["Build"] = '❌'
@@ -466,7 +466,7 @@ def executeGradle(repoName, details){
         } else {
             echo "Project does not have a 'functionalTest' task."
             try{
-                sh "${builderPath} gradle --use-wrapper clean build -x test"
+                sh "${builderPath} gradle clean build -x test"
                 statusMatrix[repoName]["Build"] = '✅'
             }catch (e) {
                 statusMatrix[repoName]["Build"] = '❌'
