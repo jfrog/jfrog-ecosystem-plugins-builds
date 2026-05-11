@@ -204,7 +204,7 @@ def createBuildTasks(Map reposMap, String pluginSelected, String mvnHome, String
 }
 
 def configGradle(){
-    sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve='${jfrogPluginsDevBuildTargetRepoName}'"
+    sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve=dev-master-maven-virtual"
 }
 
 def formatStatusMatrix(Map matrix) {
@@ -447,7 +447,7 @@ def executeGradle(repoName, details){
         // Regenerate gradle.yaml with correct server ID for repos with existing config
         if (fileExists('.jfrog/projects/gradle.yaml')) {
             echo "Found existing gradle.yaml, regenerating with repo21 server ID..."
-            sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve='${jfrogPluginsDevBuildTargetRepoName}' --use-wrapper"
+            sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve=dev-master-maven-virtual --use-wrapper"
         }
         
         echo "Starting Gradle build for ${repoName}..."
@@ -456,7 +456,7 @@ def executeGradle(repoName, details){
         if (hasFunctionalTest) {
             echo "Project has a 'functionalTest' task. Excluding it."
             try{
-                sh './gradlew clean build -x test -x functionalTest'
+                sh "${builderPath} gradle clean build -x test -x functionalTest --use-wrapper"
                 statusMatrix[repoName]["Build"] = '✅'
             }catch (e) {
                 statusMatrix[repoName]["Build"] = '❌'
@@ -468,7 +468,7 @@ def executeGradle(repoName, details){
         } else {
             echo "Project does not have a 'functionalTest' task."
             try{
-                sh './gradlew clean build -x test'
+                sh "${builderPath} gradle clean build -x test --use-wrapper"
                 statusMatrix[repoName]["Build"] = '✅'
             }catch (e) {
                 statusMatrix[repoName]["Build"] = '❌'
