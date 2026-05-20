@@ -91,6 +91,43 @@ node("docker-ubuntu24-xlarge") {
 
                      configGradle()
 
+                     withCredentials([
+                         usernamePassword(credentialsId: 'repo21', usernameVariable: 'REPO21_USER', passwordVariable: 'REPO21_PASSWORD'),
+                         string(credentialsId: 'repo21-url', variable: 'REPO21_URL')
+                     ]) {
+                         sh "mkdir -p '${gradleHomePath}/init.d'"
+                         writeFile(
+                             file: "${gradleHomePath}/init.d/repo21-buildscript.gradle",
+                             text: """
+def repo21Url = "\${REPO21_URL}/artifactory/dev-master-maven-virtual"
+def repo21User = "\${REPO21_USER}"
+def repo21Pass = "\${REPO21_PASSWORD}"
+
+allprojects {
+    buildscript {
+        repositories {
+            maven {
+                url repo21Url
+                credentials { username repo21User; password repo21Pass }
+            }
+        }
+    }
+}
+
+beforeSettings { settings ->
+    settings.pluginManagement {
+        repositories {
+            maven {
+                url repo21Url
+                credentials { username repo21User; password repo21Pass }
+            }
+        }
+    }
+}
+"""
+                         )
+                     }
+
                      jdk8Path = installJdkFromArchive('8')
 
                      jdk17Path = installJdkFromArchive('17')
@@ -205,46 +242,6 @@ def createBuildTasks(Map reposMap, String pluginSelected, String mvnHome, String
 
 def configGradle(){
     sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve=dev-master-maven-virtual"
-    withCredentials([
-        usernamePassword(credentialsId: 'repo21', usernameVariable: 'REPO21_USER', passwordVariable: 'REPO21_PASSWORD'),
-        string(credentialsId: 'repo21-url', variable: 'REPO21_URL')
-    ]) {
-        // Gradle's jf-gradlec routing doesn't intercept buildscript{} classpath or
-        // pluginManagement{} repos — those hit Maven Central/Plugin Portal directly and
-        // get 429s under parallel load. This init script adds repo21 as the first
-        // candidate for both so Gradle finds cached artifacts there before going upstream.
-        sh "mkdir -p '${gradleHomePath}/init.d'"
-        writeFile(
-            file: "${gradleHomePath}/init.d/repo21-buildscript.gradle",
-            text: """
-def repo21Url = "${REPO21_URL}/artifactory/dev-master-maven-virtual"
-def repo21User = "${REPO21_USER}"
-def repo21Pass = "${REPO21_PASSWORD}"
-
-allprojects {
-    buildscript {
-        repositories {
-            maven {
-                url repo21Url
-                credentials { username repo21User; password repo21Pass }
-            }
-        }
-    }
-}
-
-beforeSettings { settings ->
-    settings.pluginManagement {
-        repositories {
-            maven {
-                url repo21Url
-                credentials { username repo21User; password repo21Pass }
-            }
-        }
-    }
-}
-"""
-        )
-    }
 }
 
 def formatStatusMatrix(Map matrix) {
