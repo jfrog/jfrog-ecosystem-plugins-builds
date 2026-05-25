@@ -483,11 +483,14 @@ def executeGradle(repoName, details){
         sh "pwd"
         sh "ls -la"
 
-        // build-info-extractor and artifactory-client-java both declare com.jfrog.artifactory
-        // in their own buildscript{} block. jf gradle injects a different version of the same
-        // plugin as an init-script dependency, producing a classloader conflict. Use the
-        // project's own Gradle wrapper for these two so only one version is ever loaded.
-        def useRawGradlew = repoName in ['build-info-extractor', 'artifactory-client-java']
+        // Three projects cannot use jf gradle:
+        // - build-info-extractor, artifactory-client-java: classloader conflict — they apply
+        //   com.jfrog.artifactory themselves and jf gradle injects a different version via
+        //   init script, causing "Cannot cast ArtifactoryPluginConvention to itself".
+        // - jfrog-testing-infra: runs with JDK 8, but the build-info-extractor-gradle uber JAR
+        //   injected by jf gradle is compiled with Java 17 (class file major version 61).
+        // For all three, use the project's own ./gradlew so only one plugin version is loaded.
+        def useRawGradlew = repoName in ['build-info-extractor', 'artifactory-client-java', 'jfrog-testing-infra']
 
         if (!useRawGradlew) {
             // jf gradle requires a per-project .jfrog/projects/gradle.yaml. Always run gradlec
