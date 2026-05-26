@@ -79,6 +79,7 @@ node("docker-ubuntu24-xlarge") {
             stage('Initial Setup'){
                 try  {
                 script{
+                     echo ">>> RUNNING FROM BRANCH: RTECO-1282-gradle-buildscript-repo21-init <<<"
                      installJfrogCli()
                      selectPlugins()
                      sh 'apt-get update -y && apt-get install -y unzip'
