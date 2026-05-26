@@ -79,7 +79,6 @@ node("docker-ubuntu24-xlarge") {
             stage('Initial Setup'){
                 try  {
                 script{
-                     echo ">>> RUNNING FROM BRANCH: RTECO-1282-gradle-buildscript-repo21-init <<<"
                      installJfrogCli()
                      selectPlugins()
                      sh 'apt-get update -y && apt-get install -y unzip'
@@ -91,43 +90,6 @@ node("docker-ubuntu24-xlarge") {
                      configRepo21()
 
                      configGradle()
-
-                     withCredentials([
-                         usernamePassword(credentialsId: 'repo21', usernameVariable: 'REPO21_USER', passwordVariable: 'REPO21_PASSWORD'),
-                         string(credentialsId: 'repo21-url', variable: 'REPO21_URL')
-                     ]) {
-                         sh "mkdir -p '${gradleHomePath}/init.d'"
-                         writeFile(
-                             file: "${gradleHomePath}/init.d/repo21-buildscript.gradle",
-                             text: """
-def repo21Url = "\${REPO21_URL}/artifactory/dev-master-maven-virtual"
-def repo21User = "\${REPO21_USER}"
-def repo21Pass = "\${REPO21_PASSWORD}"
-
-allprojects {
-    buildscript {
-        repositories {
-            maven {
-                url repo21Url
-                credentials { username repo21User; password repo21Pass }
-            }
-        }
-    }
-}
-
-beforeSettings { settings ->
-    settings.pluginManagement {
-        repositories {
-            maven {
-                url repo21Url
-                credentials { username repo21User; password repo21Pass }
-            }
-        }
-    }
-}
-"""
-                         )
-                     }
 
                      jdk8Path = installJdkFromArchive('8')
 
