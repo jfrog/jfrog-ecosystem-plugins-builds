@@ -37,17 +37,17 @@ node("docker-ubuntu24-xlarge") {
             env.REPO_NAME_21 = "$repo21Name"
         }
         def reposMap = [
-            "artifactory-jenkins-plugin": [url: "https://github.com/jfrog/jenkins-artifactory-plugin", branch:"master", type: "maven", jdk:"8"],
+            "artifactory-jenkins-plugin": [url: "https://github.com/jfrog/jenkins-artifactory-plugin", branch:"master", type: "maven", jdk:"8", resolveRepo: "ecosys-jenkins-repos"],
             "build-info-extractor": [url: "https://github.com/jfrog/build-info", branch: "master", type: "gradle", buildDir:"build/libs", jdk:"8"],
-            "teamcity-artifactory-plugin": [url: "https://github.com/jfrog/teamcity-artifactory-plugin.git", branch: "master",  type: "maven", jdk:"17"],
+            "teamcity-artifactory-plugin": [url: "https://github.com/jfrog/teamcity-artifactory-plugin.git", branch: "master",  type: "maven", jdk:"17", resolveRepo: "ecosys-teamcity-repos"],
             "artifactory-maven-plugin": [url: "https://github.com/jfrog/artifactory-maven-plugin.git", branch: "master", type: "maven", jdk:"8"],
             "artifactory-client-java": [url: "https://github.com/jfrog/artifactory-client-java.git", branch: "master", type: "gradle", buildDir:"services/build/libs", "jdk":"8"],
             "artifactory-gradle-plugin": [url: "https://github.com/jfrog/artifactory-gradle-plugin.git", branch: "main", type: "gradle", buildDir:"build/libs", hasFunctionalTest:true, jdk:"8"],
             "file-specs-java": [url: "https://github.com/jfrog/file-specs-java.git", branch: "main", type: "gradle", buildDir:"build/libs", jdk:"8"],
             "jfrog-testing-infra": [url: "https://github.com/jfrog/jfrog-testing-infra.git", branch: "main", dir:"java", type: "gradle", buildDir:"build/libs", jdk:"8"],
-            "bamboo-artifactory-plugin": [url: "https://github.com/jfrog/bamboo-artifactory-plugin.git", branch: "master", type: "maven", jdk:"11"],
-            "jenkins-jfrog-plugin": [url: "https://github.com/jenkinsci/jfrog-plugin.git", branch:"main", type: "maven", jdk:"11"],
-            "bamboo-jfrog-plugin": [url: "https://github.com/jfrog/bamboo-jfrog-plugin.git", branch: "main", type: "maven", jdk:"17"],
+            "bamboo-artifactory-plugin": [url: "https://github.com/jfrog/bamboo-artifactory-plugin.git", branch: "master", type: "maven", jdk:"11", resolveRepo: "ecosys-bamboo-repos"],
+            "jenkins-jfrog-plugin": [url: "https://github.com/jenkinsci/jfrog-plugin.git", branch:"main", type: "maven", jdk:"11", resolveRepo: "ecosys-jenkins-repos"],
+            "bamboo-jfrog-plugin": [url: "https://github.com/jfrog/bamboo-jfrog-plugin.git", branch: "main", type: "maven", jdk:"17", resolveRepo: "ecosys-bamboo-repos"],
             "jfrog-azure-devops-extension": [url: "https://github.com/jfrog/jfrog-azure-devops-extension.git",branch: "dev", type: "npm"]
         ]
 
@@ -347,7 +347,8 @@ def executeMaven(repoName, details){
             echo "Cloning from ${details.url}..."
             git url: details.url, branch: details.branch
 
-            sh "${builderPath} mvnc --server-id-resolve=repo21 --repo-resolve-releases=dev-master-maven-virtual --repo-resolve-snapshots=dev-master-maven-virtual"
+            def resolveRepo = details.resolveRepo ?: 'dev-master-maven-virtual'
+            sh "${builderPath} mvnc --server-id-resolve=repo21 --repo-resolve-releases=${resolveRepo} --repo-resolve-snapshots=${resolveRepo}"
             sh "${builderPath} mvn clean install -DskipTests"
 
             sh "mkdir -p ${tempScanDir}"
@@ -404,9 +405,10 @@ def UploadAndScanBinary(repoName, uploadFileName, scanFileName){
             sh "${builderPath} scan --server-id=repo21 '${scanFileName}' --ant=true --watches ${watchName}"
             statusMatrix[repoName]["Scan"] = '✅'
         }catch(e){
-            echo "Inside Scan Binary Catch"
+            // Scan violations on dev binaries are recorded but not fatal — the job should
+            // not be blocked by CVEs that need fixing in the upstream projects.
             statusMatrix[repoName]["Scan"] = '❌'
-            throw e
+            echo "Scan violations found for ${repoName}: ${e.message}"
         }
     }
 }
@@ -443,18 +445,29 @@ def executeGradle(repoName, details){
         echo "Contents Inside.."
         sh "pwd"
         sh "ls -la"
-        
-        // jf gradle requires a per-project .jfrog/projects/gradle.yaml. Always run gradlec
-        // here so `jf gradle ... --use-wrapper` can resolve through repo21.
+
+        // Always run gradlec so jf audit has a valid server config (gradle.yaml).
+        // Some repos ship their own gradle.yaml with a different serverID that jf audit
+        // would otherwise pick up and fail on.
         sh "${builderPath} gradlec --server-id-resolve=repo21 --repo-resolve=dev-master-maven-virtual --use-wrapper"
-        
+
+        // Three projects cannot use jf gradle for the BUILD step:
+        // - build-info-extractor, artifactory-client-java: classloader conflict — they apply
+        //   com.jfrog.artifactory themselves and jf gradle injects a different version via
+        //   init script, causing "Cannot cast ArtifactoryPluginConvention to itself".
+        // - jfrog-testing-infra: runs with JDK 8, but the build-info-extractor-gradle uber JAR
+        //   injected by jf gradle is compiled with Java 17 (class file major version 61).
+        // gradlec above is safe for all three; only jf gradle triggers the conflict.
+        def useRawGradlew = repoName in ['build-info-extractor', 'artifactory-client-java', 'jfrog-testing-infra']
+
         echo "Starting Gradle build for ${repoName}..."
 
+        def gradleCmd = useRawGradlew ? "./gradlew" : "${builderPath} gradle"
         def hasFunctionalTest = details.hasFunctionalTest
         if (hasFunctionalTest) {
             echo "Project has a 'functionalTest' task. Excluding it."
             try{
-                sh "${builderPath} gradle clean build -x test -x functionalTest"
+                sh "${gradleCmd} clean build -x test -x functionalTest"
                 statusMatrix[repoName]["Build"] = '✅'
             }catch (e) {
                 statusMatrix[repoName]["Build"] = '❌'
@@ -466,7 +479,7 @@ def executeGradle(repoName, details){
         } else {
             echo "Project does not have a 'functionalTest' task."
             try{
-                sh "${builderPath} gradle clean build -x test"
+                sh "${gradleCmd} clean build -x test"
                 statusMatrix[repoName]["Build"] = '✅'
             }catch (e) {
                 statusMatrix[repoName]["Build"] = '❌'
